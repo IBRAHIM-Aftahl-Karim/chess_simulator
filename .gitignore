@@ -1,0 +1,16 @@
+
+venv/
+env/
+ENV/
+
+stockfish/
+__pycache__/
+*.py[cod]
+*$py.class
+*.exe
+*.msi
+*.bin
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
