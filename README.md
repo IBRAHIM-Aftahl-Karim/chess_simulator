@@ -43,5 +43,5 @@ Passionné d'échecs, j'ai créé cet outil pour pallier la frustration de jouer
 
 &#x20;  ```bash
 
-&#x20;  git clone \[https://github.com/TON\_PSEUDO/chess-simulator.git](https://github.com/TON\_PSEUDO/chess-simulator.git)
+&#x20;  git clone https://github.com/IBRAHIM-Aftahl-Karim/chess_simulator.git
 
