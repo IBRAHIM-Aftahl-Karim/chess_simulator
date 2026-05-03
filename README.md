@@ -1,47 +1,55 @@
-\# ♟️ Chess Human Simulator
+# ♟️ Chess Human Simulator
 
+Une interface Python conçue pour simuler un comportement de réflexion humain face à un moteur d'échecs (Stockfish).
 
-
-Une interface Python conçue pour simuler un comportement de réflexion humain face à un moteur d'échecs (Stockfish). 
-
-
-
-\## 🎯 Le Projet
+## 🎯 Le Projet
 
 Passionné d'échecs, j'ai créé cet outil pour pallier la frustration de jouer contre une IA qui répond instantanément. Ce simulateur introduit une latence adaptative basée sur la complexité de la position, recréant l'immersion d'une partie réelle "Over The Board" (OTB).
 
+## 🛠️ Stack Technique
+
+- Langage : Python 3.8+
+- Logique de jeu : `python-chess`
+- Moteur d'analyse : Stockfish (via protocole UCI)
+- Interface : GUI développée en Python (Tkinter)
+
+## ✨ Fonctionnalités clés
+
+- **Interface Graphique** : Visualisation du plateau et déplacement des pièces au clic ou via saisie texte (SAN/UCI).
+- **Algorithme de Temporisation** : Simulation d'un temps de réflexion humain selon la phase de jeu et la complexité de la position.
+- **Pendule intégrée** : Gestion complète du temps avec incrément et bonus au coup X.
+- **Niveaux ajustables** : Slider Elo de 800 à 2800.
+
+## 📁 Structure du répertoire
+
+* **chess_gui.py** : #Fichier principal.
+* **stockfish/** : Dossier à créer, contenant le binaire Stockfish.
+* **.gitignore**
+* **README.md**
 
 
-\## Stack Technique
+## 🚀 Installation \& Utilisation
 
-* Langage : Python 3
-* Logique de jeu : `python-chess`
-* Moteur d'analyse : Stockfish (via protocole UCI)
-* Interface :\*\* GUI développée en Python (Tkinter)
+1. Cloner le dépot
+```bash
+git clone https://github.com/IBRAHIM-Aftahl-Karim/chess_simulator.git
+cd chess_simulator
+```
 
+2. Installer les dépendances :
+```bash
+pip install python-chess
+```
 
+3. Télécharger Stockfish sur [stockfishchess.org](https://stockfishchess.org/download/) et placer l'exécutable dans le dossier `stockfish/`.
 
-\## Fonctionnalités clés
+4. Lancer le simulateur :
+```bash
+python chess_gui.py
+```
 
-* Interface Graphique : Visualisation du plateau et déplacement des pièces.
-* Algorithme de Temporisation : Simulation d'un temps de réflexion humain (pondération aléatoire et logique).
-* Communication Inter-processus : Gestion des flux d'entrée/sortie avec l'exécutable Stockfish.
+## ⚠️ Notes
 
-
-
-\## 📁 Structure du répertoire
-
-* chess\_gui.py` : Gestion de l'interface utilisateur et des événements.
-* `chess-simulator.py` : Logique principale et interaction avec le moteur de jeu.
-* `stockfish/` : Dossier contenant les binaires du moteur d'analyse.
-
-
-
-\## 🚀 Installation \& Utilisation
-
-1\. Cloner le dépôt :
-
-&#x20;  ```bash
-
-&#x20;  git clone https://github.com/IBRAHIM-Aftahl-Karim/chess_simulator.git
+- La promotion d'un pion se fait toujours en dame via le clic. Pour choisir une autre pièce, utiliser la saisie texte (ex: `a8=N`).
+- Compatible Windows, Linux et macOS.
 
