@@ -9,10 +9,10 @@ import tkinter as tk
 from tkinter import ttk, messagebox, font as tkfont
 import os
 import sys
-import winsound
 
 
-STOCKFISH_PATH = r"C:\Users\ismai\Desktop\chess-simulator\stockfish\stockfish-windows-x86-64-avx2.exe"
+import shutil
+STOCKFISH_PATH = shutil.which("stockfish") or r"stockfish\stockfish-windows-x86-64-avx2.exe"
 STOCKFISH_ELO  = 1800
 
 TIME_CONTROL = {
@@ -101,13 +101,41 @@ def compute_think_time(board, infos, prev_eval, curr_eval, remaining):
        + score_position_state(curr_eval))
     s = max(0.0, s)
     mn = board.fullmove_number
-    t  = T_BASE + T_COEFF * s
-    if mn <= 10:   t = min(t, 45);  noise = random.uniform(2, 15)
-    elif mn <= 25: t = min(t, 180); noise = random.uniform(5, 40)
-    else:          noise = random.uniform(10, 60)
-    if random.random() < 0.4: noise = -noise
-    t = max(T_MIN, min(T_MAX, t + noise))
-    return min(t, remaining * 0.25)
+
+    # ── Coups 1-6 : ouverture théorique, quasi instantané ──
+    if mn <= 6:
+        t = random.uniform(2, 10)
+        return min(t, remaining * 0.03)
+
+    # ── Coups 7-14 : fin d'ouverture, on commence à réfléchir ──
+    elif mn <= 14:
+        # 30s à 3min selon la complexité
+        t = 15 + T_COEFF * 0.5 * s
+        t = min(t, 180)
+        noise = random.uniform(5, 40)
+        if random.random() < 0.4: noise = -noise
+        t = max(5, t + noise)
+        return min(t, remaining * 0.12)
+
+    # ── Coups 15-35 : milieu de jeu, gros calculs possibles ──
+    elif mn <= 35:
+        # 2min à 10min selon la complexité
+        t = 45 + T_COEFF * 1.5 * s
+        t = min(t, 600)
+        noise = random.uniform(15, 90)
+        if random.random() < 0.4: noise = -noise
+        t = max(30, t + noise)
+        return min(t, remaining * 0.22)
+
+    # ── Coups 36+ : finale, calcul précis et long ──
+    else:
+        # 3min à 15min selon la complexité
+        t = 180 + T_COEFF * 2.0 * s
+        t = min(t, 900)
+        noise = random.uniform(20, 120)
+        if random.random() < 0.4: noise = -noise
+        t = max(20, t + noise)
+        return min(t, remaining * 0.28)
 
 class ChessApp(tk.Tk):
     def __init__(self):
@@ -119,6 +147,9 @@ class ChessApp(tk.Tk):
         self.board      = chess.Board()
         self.engine     = None
         self.player_color = chess.WHITE
+        self.bonus_move = None
+        self.bonus_time = 0
+        self.bonus_increment_after_bonus = 0.0
         self.clocks     = {chess.WHITE: float(TIME_CONTROL["base_time"]),
                            chess.BLACK: float(TIME_CONTROL["base_time"])}
         self.increment  = float(TIME_CONTROL["increment"])
@@ -216,6 +247,7 @@ class ChessApp(tk.Tk):
         tk.Label(right, textvariable=self.fen_var, bg="#1E1E1E", fg="#555",
                  font=("Courier", 8), wraplength=270).pack(anchor="w")
         self.setup_win = None
+
     def _clock_widget(self, parent, label, accent):
         f = tk.Frame(parent, bg="#2A2A2A", relief="flat")
         tk.Label(f, text=label, bg="#2A2A2A", fg=accent,
@@ -226,6 +258,7 @@ class ChessApp(tk.Tk):
         f._time_label = time_lbl
         f._label      = label
         return f
+
     def _show_setup(self):
         win = tk.Toplevel(self)
         win.title("Nouvelle partie")
@@ -250,11 +283,11 @@ class ChessApp(tk.Tk):
                  font=("Helvetica", 11)).pack(**pad)
         self.tc_var = tk.StringVar(value="3600,15")
         for txt, val in [
-            ("60 min + 15s", "3600,15"),
-            ("90 min + 30s", "5400,30"),
-            ("2h + 0s",      "7200,0"),
-            ("30 min + 10s", "1800,10"),
-            ("40 min + 20min/40 + 0s", "2400,0,40,1200,10"),
+            ("2h + 40e + 30min", "7200,0,40,1800,0"),
+            ("90min + 30e - 30min + 30s", "5400,0,40,1800,30"),
+            ("60 min + 30e - 25min + 10s", "3600,0,30,1200,10"),
+            ("15min + 10s", "900,10"),
+
         ]:
             tk.Radiobutton(win, text=txt, variable=self.tc_var, value=val,
                 bg="#1E1E1E", fg="#EEE", selectcolor="#333",
@@ -273,12 +306,12 @@ class ChessApp(tk.Tk):
             troughcolor="#333", highlightthickness=0, length=200,
             showvalue=False, command=lambda v: self.elo_lbl.config(text=v))
         elo_sl.pack(side="left")
-
         tk.Button(win, text="Démarrer la partie", command=self._start_game,
             bg="#4A7C59", fg="white", font=("Helvetica", 13, "bold"),
             relief="flat", padx=20, pady=10, cursor="hand2",
             activebackground="#3A6A49"
         ).pack(pady=(16, 20))
+
     def _start_game(self):
         if self.setup_win:
             self.setup_win.destroy()
@@ -287,10 +320,11 @@ class ChessApp(tk.Tk):
         base = float(tc[0])
         self.increment = float(tc[1])
         self.bonus_move = int(tc[2]) if len(tc) > 2 else None
-        self.bonus_time = float(tc[3]) if len(tc) > 3 else 0 
+        self.bonus_time = float(tc[3]) if len(tc) > 3 else 0
         self.bonus_increment_after_bonus = float(tc[4]) if len(tc) > 4 else self.increment
         self.player_color = chess.WHITE if self.color_var.get() == "w" else chess.BLACK
-        STOCKFISH_ELO_live = self.elo_var.get()
+        # Stocker l'Elo comme attribut d'instance pour y accéder depuis le thread
+        self.current_elo = self.elo_var.get()
         self.board = chess.Board()
         self.clocks = {chess.WHITE: base, chess.BLACK: base}
         self.selected_sq = None
@@ -308,14 +342,6 @@ class ChessApp(tk.Tk):
             text=self._fmt(self.clocks[engine_color]))
         tk.Label(self.player_frame, text=pname, bg="#2A2A2A", fg="#F0D9B5",
                  font=("Helvetica", 10, "bold")).place(x=12, y=8)
-        if self.engine:
-            try:
-                self.engine.configure({
-                    "UCI_LimitStrength": True,
-                    "UCI_Elo": STOCKFISH_ELO_live
-                })
-            except Exception:
-                pass
         self._draw_board()
         self._update_history()
         self._start_clock_tick()
@@ -323,6 +349,7 @@ class ChessApp(tk.Tk):
             self._begin_player_turn()
         else:
             self.after(300, self._begin_engine_turn)
+
     def _load_engine(self):
         try:
             self.engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
@@ -330,15 +357,18 @@ class ChessApp(tk.Tk):
         except Exception as e:
             self.engine = None
             self._set_status(f"✗ Stockfish introuvable : {e}", "#FF6B6B")
+
     def _fmt(self, secs):
         secs = max(0, int(secs))
         h, rem = divmod(secs, 3600)
         m, s   = divmod(rem, 60)
         if h: return f"{h}:{m:02d}:{s:02d}"
         return f"{m:02d}:{s:02d}"
+
     def _start_clock_tick(self):
         self._clock_last = time.time()
         self._tick()
+
     def _tick(self):
         if self.game_over: return
         now = time.time()
@@ -354,6 +384,7 @@ class ChessApp(tk.Tk):
                 return
             self._update_clock_display()
         self.after(100, self._tick)
+
     def _update_clock_display(self):
         pc = self.player_color
         ec = not self.player_color
@@ -367,6 +398,7 @@ class ChessApp(tk.Tk):
         self.engine_frame.config(bg="#2A4A2A" if self.active_clock == ec else "#2A2A2A")
         self.player_frame._time_label.config(bg="#2A4A2A" if self.active_clock == pc else "#2A2A2A")
         self.engine_frame._time_label.config(bg="#2A4A2A" if self.active_clock == ec else "#2A2A2A")
+
     def _begin_player_turn(self):
         self.waiting_player = True
         self.active_clock   = self.player_color
@@ -374,6 +406,7 @@ class ChessApp(tk.Tk):
         self.play_btn.config(state="normal")
         self.move_entry.focus_set()
         self._set_status("À vous de jouer…", "#7FC97F")
+
     def _play_text_move(self):
         if not self.waiting_player or self.game_over: return
         raw = self.move_var.get().strip()
@@ -390,6 +423,7 @@ class ChessApp(tk.Tk):
             self._set_status("✗ Coup illégal", "#FF6B6B")
             return
         self._apply_player_move(move)
+
     def _on_board_click(self, event):
         if not self.waiting_player or self.game_over: return
         col = (event.x - 12) // SQ_SIZE
@@ -408,7 +442,6 @@ class ChessApp(tk.Tk):
                 self._draw_board()
             return
         if sq in self.legal_targets:
-            # Promotion automatique en dame
             move = None
             for m in self.board.legal_moves:
                 if m.from_square == self.selected_sq and m.to_square == sq:
@@ -430,6 +463,7 @@ class ChessApp(tk.Tk):
             self.selected_sq  = None
             self.legal_targets = []
         self._draw_board()
+
     def _apply_player_move(self, move):
         self.waiting_player = False
         self.active_clock   = None
@@ -438,11 +472,11 @@ class ChessApp(tk.Tk):
         san = self.board.san(move)
         self.board.push(move)
         move_count = len(self.board.move_stack)
-        if self.bonus_move and move_count == self.bonus_move *2:
-            self.clocks[chess.WHITE]+=self.bonus_time
-            self.clocks[chess.BLACK]+=self.bonus_time
+        if self.bonus_move and move_count == self.bonus_move * 2:
+            self.clocks[chess.WHITE] += self.bonus_time
+            self.clocks[chess.BLACK] += self.bonus_time
             self.increment = self.bonus_increment_after_bonus
-        self.clocks[self.player_color]+= self.increment
+        self.clocks[self.player_color] += self.increment
         self.last_move = move
         self.selected_sq = None
         self.legal_targets = []
@@ -454,6 +488,7 @@ class ChessApp(tk.Tk):
             self._end_game(self._result_str())
             return
         self.after(200, self._begin_engine_turn)
+
     def _begin_engine_turn(self):
         if self.game_over: return
         self.engine_thinking = True
@@ -461,37 +496,53 @@ class ChessApp(tk.Tk):
         self.active_clock = engine_color
         self._set_status("Stockfish réfléchit…", "#FFC107")
         threading.Thread(target=self._engine_think_thread, daemon=True).start()
+
     def _engine_think_thread(self):
         engine_color = not self.player_color
         remaining    = self.clocks[engine_color]
-        infos = []
+        elo          = self.current_elo  # ← Elo choisi au démarrage de la partie
+
+        infos     = []
         curr_eval = None
         best_move = None
+
         if self.engine:
+            # ── Étape 1 : analyse MultiPV sans limite Elo (pour l'éval et la complexité) ──
             try:
                 infos = self.engine.analyse(
                     self.board,
                     chess.engine.Limit(time=ANALYSIS_TIME),
                     multipv=MULTIPV,
+                    options={"UCI_LimitStrength": False},
                 )
                 if infos:
                     info0 = infos[0] if isinstance(infos, list) else infos
                     sc = info0.get("score")
                     if sc and not sc.is_mate():
                         curr_eval = sc.relative.score()
-                    pv = info0.get("pv")
-                    if pv: best_move = pv[0]
             except Exception:
                 pass
-            if best_move is None:
-                try:
-                    result = self.engine.play(self.board, chess.engine.Limit(time=ANALYSIS_TIME))
-                    best_move = result.move
-                except Exception:
-                    pass
+
+            # ── Étape 2 : coup joué AVEC la limite Elo du slider ──
+            try:
+                result = self.engine.play(
+                    self.board,
+                    chess.engine.Limit(time=ANALYSIS_TIME),
+                    options={
+                        "UCI_LimitStrength": True,
+                        "UCI_Elo": elo,         # ← valeur du slider, pas la constante globale
+                    },
+                )
+                best_move = result.move
+            except Exception:
+                pass
+
+        # Fallback si le moteur n'a pas répondu
         if best_move is None:
             legal = list(self.board.legal_moves)
             best_move = random.choice(legal) if legal else None
+
+        # ── Temps de réflexion simulé ──
         wait = compute_think_time(
             self.board,
             infos if isinstance(infos, list) else [infos],
@@ -512,10 +563,16 @@ class ChessApp(tk.Tk):
                     self.after(0, lambda m=msg: self._set_status(m, "#FFC107"))
                     break
             time.sleep(0.2)
+
         self.prev_eval = curr_eval
         self.after(0, lambda: self._apply_engine_move(best_move, curr_eval))
+
     def _apply_engine_move(self, move, curr_eval):
-        winsound.Beep(440,100)
+        try:
+            import winsound
+            winsound.Beep(440, 100)
+        except ImportError:
+            pass
         if self.game_over or move is None: return
         self.engine_thinking = False
         self.active_clock    = None
@@ -523,11 +580,11 @@ class ChessApp(tk.Tk):
         self.board.push(move)
         engine_color = not self.player_color
         move_count = len(self.board.move_stack)
-        if self.bonus_move and move_count == self.bonus_move *2:
-            self.clocks[chess.WHITE]+=self;self.bonus_time
-            self.clocks[chess.BLACK]+=self;self.bonus_time
-            self.increment =self.bonus_increment_after_bonus
-        self.clocks[engine_color]+=self.increment
+        if self.bonus_move and move_count == self.bonus_move * 2:
+            self.clocks[chess.WHITE] += self.bonus_time
+            self.clocks[chess.BLACK] += self.bonus_time
+            self.increment = self.bonus_increment_after_bonus
+        self.clocks[engine_color] += self.increment
         self.last_move = move
         self._draw_board()
         self._update_history()
@@ -537,10 +594,11 @@ class ChessApp(tk.Tk):
             self._end_game(self._result_str())
             return
         self.after(300, self._begin_player_turn)
+
     def _draw_board(self):
         c = self.canvas
         c.delete("all")
-        OFFSET = 12  # marge pour les labels
+        OFFSET = 12
         in_check = self.board.is_check()
         king_sq  = self.board.king(self.board.turn) if in_check else None
         for sq in chess.SQUARES:
@@ -576,7 +634,8 @@ class ChessApp(tk.Tk):
             if piece:
                 sym = PIECES[piece.symbol()]
                 c.create_text(x + SQ_SIZE//2, y + SQ_SIZE//2,
-                    text=sym, font=("Segoe UI Symbol", 40), fill="#FAFAFA" if piece.color else "#1A1A1A",
+                    text=sym, font=("Segoe UI Symbol", 40),
+                    fill="#FAFAFA" if piece.color else "#1A1A1A",
                     tags="piece")
         files = "abcdefgh" if self.player_color == chess.WHITE else "hgfedcba"
         ranks = "87654321" if self.player_color == chess.WHITE else "12345678"
@@ -586,8 +645,8 @@ class ChessApp(tk.Tk):
                           text=files[i], fill="#888", font=("Helvetica", 9))
             c.create_text(6, OFFSET + i * SQ_SIZE + SQ_SIZE//2,
                           text=ranks[i], fill="#888", font=("Helvetica", 9))
-
         self.fen_var.set(self.board.fen())
+
     def _update_eval(self, cp):
         if cp is None: return
         pawns = cp / 100.0
@@ -597,6 +656,7 @@ class ChessApp(tk.Tk):
         self.eval_bar.config(bg=color)
         sign = "+" if pawns >= 0 else ""
         self.eval_label.config(text=f"{sign}{pawns:.2f}")
+
     def _update_history(self):
         moves = self.board.move_stack
         san_list = []
@@ -614,9 +674,11 @@ class ChessApp(tk.Tk):
         self.hist_text.insert("end", "\n".join(lines))
         self.hist_text.see("end")
         self.hist_text.config(state="disabled")
+
     def _set_status(self, msg, color="#CCC"):
         self.status_var.set(msg)
         self.status_lbl.config(fg=color)
+
     def _result_str(self):
         if self.board.is_checkmate():
             winner = not self.board.turn
@@ -626,6 +688,7 @@ class ChessApp(tk.Tk):
         if self.board.is_repetition():  return "Répétition — Nulle."
         if self.board.is_fifty_moves(): return "Règle des 50 coups — Nulle."
         return "Fin de partie."
+
     def _end_game(self, msg):
         self.game_over    = True
         self.active_clock = None
@@ -634,23 +697,28 @@ class ChessApp(tk.Tk):
         self.play_btn.config(state="disabled")
         self._set_status(msg, "#FFC107")
         messagebox.showinfo("Fin de partie", msg)
+
     def _abandon(self):
         if not self.game_over:
             self._end_game("Vous avez abandonné.")
+
     def _draw(self):
         if not self.game_over:
             self._end_game("Nulle proposée — acceptée.")
+
     def _new_game(self):
         if self.game_over or messagebox.askyesno("Nouvelle partie", "Abandonner la partie en cours ?"):
             self.game_over    = True
             self.active_clock = None
             self._show_setup()
+
     def on_close(self):
         self.game_over = True
         if self.engine:
             try: self.engine.quit()
             except: pass
         self.destroy()
+
 if __name__ == "__main__":
     app = ChessApp()
     app.protocol("WM_DELETE_WINDOW", app.on_close)
